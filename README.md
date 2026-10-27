@@ -13,7 +13,7 @@ npm test
 npm pack
 ```
 
-This repository and package are private. No public npm package or CDN is published. Consumers currently install a reviewed, committed tarball with `npm install ./vendor/trustables-browser-0.1.0.tgz`; their lockfile pins its integrity. Rebuild and replace that tarball when updating the widget. The package contains compiled ESM, TypeScript declarations, styles and attributed assets.
+This repository and package are private. No public npm package or CDN is published. Consumers currently install a reviewed, committed tarball with `npm install ./vendor/trustables-browser-0.1.1.tgz`; their lockfile pins its integrity. Rebuild and replace that tarball when updating the widget. The package contains compiled ESM, TypeScript declarations, styles and attributed assets.
 
 Copy `dist/widget.css`, `dist/fonts.css` and `assets/Inter-latin.woff2` into your public asset directory, preserving those relative paths. Pass the public URL of `dist/widget.css` as `stylesheetUrl` when bundling the JavaScript. The default resolves CSS relative to the module, which also supports unbundled ESM. Styles are isolated in a shadow tree; the font stylesheet registers Inter in the document. CSP requires your asset origin for styles/fonts and `data:` images; no inline script or style permission is required.
 
@@ -42,6 +42,8 @@ const widget = mountVerification(document.querySelector("#verification")!, {
 // When the view is removed:
 widget.destroy();
 ```
+
+Pass `alternative: { url, label }` for a merchant-owned HTTPS or email contact route. A URL of `#` is an intentionally non-navigating sales-demo placeholder; it does not satisfy the guideline requirement for a working alternative method.
 
 `Review` has `requester`, `purpose`, `credential`, `expires_at` (ISO date), and `branded`. Take these values from the server; `branded` reflects the session's subscription snapshot and controls the Trustables attribution. Review text is inserted as text, never HTML.
 

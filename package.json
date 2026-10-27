@@ -1,6 +1,6 @@
 {
   "name": "@trustables/browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Private preview framework-independent verification widget",
@@ -20,8 +20,9 @@
     "test": "npm run build && node --test tests/unit.mjs && node tests/browser.mjs"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "playwright": "1.63.0"
+    "axe-core": "^4.13.0",
+    "playwright": "1.63.0",
+    "typescript": "5.9.3"
   },
   "engines": {
     "node": ">=22"

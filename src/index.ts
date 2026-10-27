@@ -23,6 +23,8 @@ export type Options = {
   review: Review;
   transport: Transport;
   language?: "en" | "de";
+  /** Merchant-owned contact or alternative verification route. */
+  alternative?: { url: string; label: string };
   onComplete?: (result: VerificationStatus) => void;
   onCancel?: () => void;
 };
@@ -123,6 +125,12 @@ export function mountVerification(
 ): Widget {
   if (!Number.isFinite(Date.parse(options.review.expires_at)))
     throw new Error("Invalid session expiry");
+  let alternative: URL | undefined;
+  if (options.alternative) {
+    alternative = new URL(options.alternative.url, document.baseURI);
+    if ((options.alternative.url !== "#" && !["https:", "mailto:"].includes(alternative.protocol)) || alternative.username || alternative.password)
+      throw new Error("Invalid alternative verification link");
+  }
   const host = document.createElement("div");
   container.append(host);
   const root = host.attachShadow({ mode: "open" }),
@@ -130,6 +138,16 @@ export function mountVerification(
   const artwork = options.language === "de" ? verifyDe : verifyEn;
   const buttonImage = `<img src="${artwork}" alt="${l.button}">`;
   root.innerHTML = `<section class="review" aria-label="${l.title}"><div><small>${l.requested}</small><p id="requester"></p></div><div><small>${l.request}</small><p id="credential"></p></div><div><small>${l.purpose}</small><p id="purpose"></p></div></section><p class="need">${l.need}</p><button class="wallet-button" id="start" aria-label="${l.button}">${buttonImage}</button><p id="message" class="message" role="status"></p>${options.review.branded ? `<div class="brand"><img src="${trustables}" alt="Trustables">${l.powered}</div>` : ""}<dialog aria-labelledby="title"><button class="close" aria-label="${l.close}">×</button><div id="state" aria-live="polite" aria-atomic="true"></div><p id="connection" role="status"></p></dialog>`;
+  if (alternative && options.alternative) {
+    const need = root.querySelector<HTMLElement>(".need")!;
+    need.textContent = options.language === "de"
+      ? "Du benötigst die d-you Wallet App. " : "You need the d-you Wallet app. ";
+    const link = document.createElement("a");
+    link.href = alternative.href;
+    link.textContent = options.alternative.label;
+    if (options.alternative.url === "#") link.onclick = (event) => event.preventDefault();
+    need.append(link);
+  }
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
   stylesheet.href =
@@ -199,12 +217,18 @@ export function mountVerification(
       first?.focus();
     }
   };
+  // Replacing focused controls must not strand keyboard focus outside the dialog.
+  const renderState = (html: string) => {
+    const hadFocus = !!root.activeElement && state.contains(root.activeElement);
+    state.innerHTML = html;
+    if (hadFocus) root.querySelector<HTMLButtonElement>(".close")!.focus();
+  };
   const finish = (result: VerificationStatus) => {
     terminal = true;
     stop();
     connection.textContent = "";
     const ok = result.status === "completed";
-    state.innerHTML = `<h2 id="title">${ok ? l.success : result.status === "expired" ? l.expired : l.failed}</h2><p>${ok ? (result.redirect_uri ? l.return : l.done) : l.retry}</p>${ok ? '<div class="success" aria-hidden="true">✓</div>' : ""}`;
+    renderState(`<h2 id="title">${ok ? l.success : result.status === "expired" ? l.expired : l.failed}</h2><p>${ok ? (result.redirect_uri ? l.return : l.done) : l.retry}</p>${ok ? '<div class="success" aria-hidden="true">✓</div>' : ""}`);
     if (ok) options.onComplete?.(result);
   };
   const poll = async () => {
@@ -234,7 +258,7 @@ export function mountVerification(
       }
       if (result.status === "wallet_opened" && !walletOpened) {
         walletOpened = true;
-        state.innerHTML = `<h2 id="title">${l.loading}</h2><p>${l.follow}</p><div class="spinner" aria-hidden="true"></div>`;
+        renderState(`<h2 id="title">${l.loading}</h2><p>${l.follow}</p><div class="spinner" aria-hidden="true"></div>`);
       }
     } catch {
       if (!disposed && !closed) connection.textContent = l.connection;
@@ -246,7 +270,7 @@ export function mountVerification(
     started = true;
     starting = true;
     trigger.setAttribute("aria-disabled", "true");
-    state.innerHTML = `<h2 id="title">${l.title}</h2><p>${l.prepare}</p>`;
+    renderState(`<h2 id="title">${l.title}</h2><p>${l.prepare}</p>`);
     dialog.showModal();
     try {
       const handoff = validateHandoff(await options.transport.start());
@@ -255,7 +279,7 @@ export function mountVerification(
         await cancel();
         return;
       }
-      state.innerHTML = `<h2 id="title">${l.title}</h2><p>${l.other}</p><img class="qr" alt="${l.other}"><div class="divider">${l.or}</div><p>${l.same}</p><a class="wallet-button" aria-label="${l.button}">${buttonImage}</a><p id="fallback" role="status"></p><a class="info" href="https://eudi-wallet.gov.de" target="_blank" rel="noreferrer">${l.info}</a>`;
+      renderState(`<h2 id="title">${l.title}</h2><p>${l.other}</p><img class="qr" alt="${l.other}"><div class="divider">${l.or}</div><p>${l.same}</p><a class="wallet-button" aria-label="${l.button}">${buttonImage}</a><p id="fallback" role="status"></p><a class="info" href="https://eudi-wallet.gov.de" target="_blank" rel="noreferrer">${l.info}</a>`);
       state.querySelector<HTMLImageElement>(".qr")!.src =
         "data:image/png;base64," + handoff.qr_code_base64;
       const link = state.querySelector<HTMLAnchorElement>(".wallet-button")!;
@@ -267,7 +291,7 @@ export function mountVerification(
     } catch {
       starting = false;
       if (!disposed && !closed) {
-        state.innerHTML = `<h2 id="title">${l.failed}</h2><p class="error">${l.error}</p>`;
+        renderState(`<h2 id="title">${l.failed}</h2><p class="error">${l.error}</p>`);
         void cancel();
       }
     }
