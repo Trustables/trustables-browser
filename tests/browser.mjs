@@ -15,6 +15,7 @@ const server = createServer(async (req, res) => {
       );
     } else if (
       [
+        "/node_modules/axe-core/axe.min.js",
         "/dist/index.js",
         "/dist/assets.js",
         "/dist/widget.css",
@@ -42,9 +43,9 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const origin = "http://127.0.0.1:" + server.address().port;
 const browser = await chromium.launch({ headless: true });
 try {
-  for (const language of ["en", "de"]) {
+  for (const [language, width] of [["en", 1280], ["de", 390], ["en", 320]]) {
     const page = await browser.newPage({
-      viewport: { width: language === "de" ? 390 : 1280, height: 900 },
+      viewport: { width, height: 900 },
     });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -55,6 +56,7 @@ try {
       window.status = "pending";
       window.widget = mountVerification(document.getElementById("widget"), {
         language,
+        alternative: { url: "#", label: "Use another verification method" },
         review: {
           requester: "<img src=x onerror=alert(1)>",
           purpose: "Hotel check-in",
@@ -93,10 +95,22 @@ try {
       "Untrusted review is plain text",
     );
     assert.equal((await page.evaluate(() => window.calls)).start, 0);
-    await page.getByRole("button", { name: label, exact: true }).click();
+    const originalURL = page.url();
+    await page.getByRole("link", { name: "Use another verification method" }).click();
+    assert.equal(page.url(), originalURL, "Sales placeholder does not navigate");
+    await page.getByRole("button", { name: label, exact: true }).focus();
+    await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog");
     await dialog.locator(".qr").waitFor();
     await page.evaluate(() => document.fonts.ready);
+    assert.equal(await dialog.evaluate(el => el.contains(el.getRootNode().activeElement)), true);
+    const dimensions = await dialog.evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, scroll: el.scrollWidth, client: el.clientWidth }));
+    assert.equal(dimensions.width, width <= 540 ? width : 500);
+    if (width <= 540) assert.equal(dimensions.height, 900);
+    assert.ok(dimensions.scroll <= dimensions.client, "No horizontal scrolling");
+    await page.addScriptTag({ url: origin + "/node_modules/axe-core/axe.min.js" });
+    const violations = await page.evaluate(async () => (await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21aa"] } })).violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) })));
+    assert.deepEqual(violations, [], "Modal accessibility scan");
     assert.equal(
       await page.evaluate(() => document.fonts.check("15px TrustablesInter")),
       true,
@@ -125,12 +139,25 @@ try {
         true,
       );
     }
+    for (let n = 0; n < 6; n++) {
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(await dialog.evaluate(el => el.contains(el.getRootNode().activeElement)), true);
+    }
     if (language === "en") {
+      const walletLink = dialog.getByRole("link", { name: label, exact: true });
+      // Prevent the OS scheme launch in this deterministic test; preserve widget handler.
+      await walletLink.evaluate(el => el.addEventListener("click", event => event.preventDefault()));
+      await walletLink.focus();
+      await page.keyboard.press("Enter");
+      assert.equal(await dialog.locator(".qr").count(), 1, "Laptop click keeps QR until backend sees wallet");
+      assert.equal((await page.evaluate(() => window.calls)).complete, 0);
       await page.evaluate(() => (window.status = "wallet_opened"));
       await dialog
         .getByText("Continue in the d-you Wallet", { exact: true })
         .waitFor();
       assert.equal(await dialog.locator(".qr").count(), 0);
+      assert.equal(await dialog.evaluate(el => el.contains(el.getRootNode().activeElement)), true, "Focus survives state replacement");
+      assert.equal(await dialog.locator("#state").getAttribute("aria-live"), "polite");
       await page.evaluate(() => (window.status = "completed"));
       await dialog
         .getByText("Verification successful!", { exact: true })
