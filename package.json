@@ -1,0 +1,29 @@
+{
+  "name": "@trustables/browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private preview framework-independent verification widget",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "assets",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && node tools/build.mjs",
+    "test": "npm run build && node --test tests/unit.mjs && node tests/browser.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "playwright": "1.63.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

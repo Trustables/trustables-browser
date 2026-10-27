@@ -1,0 +1,287 @@
+import { verifyEn, verifyDe, trustables } from "./assets.js";
+
+export type Review = {
+  requester: string;
+  purpose: string;
+  credential: string;
+  expires_at: string;
+  branded?: boolean;
+};
+export type Handoff = { url: string; qr_code_base64: string };
+export type VerificationStatus = {
+  status: "pending" | "wallet_opened" | "completed" | "failed" | "expired";
+  redirect_uri?: string;
+};
+/** Implement these calls on your own authenticated backend. Never pass API keys here. */
+export type Transport = {
+  start(): Promise<Handoff>;
+  status(signal: AbortSignal): Promise<VerificationStatus>;
+  cancel(): Promise<unknown>;
+};
+export type Options = {
+  stylesheetUrl?: string;
+  review: Review;
+  transport: Transport;
+  language?: "en" | "de";
+  onComplete?: (result: VerificationStatus) => void;
+  onCancel?: () => void;
+};
+export type Widget = { destroy(): void };
+
+const labels = {
+  en: {
+    button: "Verify with d-you Wallet",
+    requested: "Requested by",
+    request: "Requested information",
+    purpose: "Purpose",
+    need: "You need the d-you Wallet app. For another verification method, contact the requesting business.",
+    title: "Verify now",
+    other: "Using the d-you Wallet on another device? Then scan this QR code.",
+    same: "Using the d-you Wallet on this device?",
+    or: "or",
+    info: "What is the d-you Wallet?",
+    close: "Close",
+    prepare: "Preparing wallet verification…",
+    loading: "Continue in the d-you Wallet",
+    follow: "Follow the steps shown there.",
+    success: "Verification successful!",
+    return: "You will be redirected automatically.",
+    done: "Your result is available to the requesting business.",
+    failed: "Verification unsuccessful",
+    expired: "Verification expired",
+    retry: "Request a new verification link from the business to try again.",
+    connection: "Connection interrupted. Retrying verification status…",
+    fallback:
+      "If your wallet opened, follow its instructions. Otherwise, scan the QR code with the device that has your wallet.",
+    cancelled: "Verification cancelled. Request a new link to try again.",
+    cancelFailed:
+      "Could not confirm cancellation. The request will expire automatically.",
+    error:
+      "Could not start verification. Request a new link from the business.",
+    powered: "Secure verification powered by Trustables",
+  },
+  de: {
+    button: "Verifizieren mit d-you Wallet",
+    requested: "Angefragt von",
+    request: "Angefragte Daten",
+    purpose: "Zweck",
+    need: "Du benötigst die d-you Wallet App. Für eine andere Verifizierungsmethode kontaktiere das anfragende Unternehmen.",
+    title: "Jetzt verifizieren",
+    other:
+      "Du nutzt die d-you Wallet auf einem anderen Gerät? Dann scanne diesen QR-Code.",
+    same: "Du nutzt die d-you Wallet auf diesem Gerät?",
+    or: "oder",
+    info: "Was ist die d-you Wallet?",
+    close: "Schließen",
+    prepare: "Wallet-Verifizierung wird vorbereitet…",
+    loading: "Weiter in der d-you Wallet",
+    follow: "Folge dort den angezeigten Schritten.",
+    success: "Verifizierung erfolgreich!",
+    return: "Du wirst automatisch zurückgeleitet.",
+    done: "Dein Ergebnis liegt dem anfragenden Unternehmen vor.",
+    failed: "Verifizierung nicht erfolgreich",
+    expired: "Verifizierung abgelaufen",
+    retry:
+      "Fordere beim Unternehmen einen neuen Verifizierungslink an, um es erneut zu versuchen.",
+    connection:
+      "Verbindung unterbrochen. Der Verifizierungsstatus wird erneut abgefragt…",
+    fallback:
+      "Wenn sich deine Wallet geöffnet hat, folge ihren Anweisungen. Andernfalls scanne den QR-Code mit dem Gerät, auf dem deine Wallet installiert ist.",
+    cancelled: "Verifizierung abgebrochen. Fordere einen neuen Link an.",
+    cancelFailed:
+      "Der Abbruch konnte nicht bestätigt werden. Die Anfrage läuft automatisch ab.",
+    error:
+      "Die Verifizierung konnte nicht gestartet werden. Fordere beim Unternehmen einen neuen Link an.",
+    powered: "Sichere Verifizierung mit Trustables",
+  },
+};
+
+export function validateHandoff(value: Handoff): Handoff {
+  const url = new URL(value.url);
+  if (
+    !["haip-vp:", "openid4vp:"].includes(url.protocol) ||
+    url.username ||
+    url.password
+  )
+    throw new Error("Invalid wallet link");
+  const request = new URL(url.searchParams.get("request_uri") || "");
+  if (request.protocol !== "https:" || request.username || request.password)
+    throw new Error("Invalid wallet request");
+  if (
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(value.qr_code_base64) ||
+    value.qr_code_base64.length > 500000 ||
+    !value.qr_code_base64.startsWith("iVBORw0KGgo")
+  )
+    throw new Error("Invalid QR image");
+  return value;
+}
+
+/** Mount once per session. Completion is a UI notification, never proof of identity. */
+export function mountVerification(
+  container: HTMLElement,
+  options: Options,
+): Widget {
+  if (!Number.isFinite(Date.parse(options.review.expires_at)))
+    throw new Error("Invalid session expiry");
+  const host = document.createElement("div");
+  container.append(host);
+  const root = host.attachShadow({ mode: "open" }),
+    l = labels[options.language || "en"];
+  const artwork = options.language === "de" ? verifyDe : verifyEn;
+  const buttonImage = `<img src="${artwork}" alt="${l.button}">`;
+  root.innerHTML = `<section class="review" aria-label="${l.title}"><div><small>${l.requested}</small><p id="requester"></p></div><div><small>${l.request}</small><p id="credential"></p></div><div><small>${l.purpose}</small><p id="purpose"></p></div></section><p class="need">${l.need}</p><button class="wallet-button" id="start" aria-label="${l.button}">${buttonImage}</button><p id="message" class="message" role="status"></p>${options.review.branded ? `<div class="brand"><img src="${trustables}" alt="Trustables">${l.powered}</div>` : ""}<dialog aria-labelledby="title"><button class="close" aria-label="${l.close}">×</button><div id="state" aria-live="polite" aria-atomic="true"></div><p id="connection" role="status"></p></dialog>`;
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href =
+    options.stylesheetUrl || new URL("./widget.css", import.meta.url).href;
+  root.prepend(stylesheet);
+  // Font faces must be registered in the document, outside the shadow tree.
+  const fonts = document.createElement("link");
+  fonts.rel = "stylesheet";
+  fonts.href = new URL("./fonts.css", stylesheet.href).href;
+  document.head.append(fonts);
+  for (const key of ["requester", "credential", "purpose"] as const)
+    root.getElementById(key)!.textContent = options.review[key];
+  const dialog = root.querySelector("dialog")!,
+    trigger = root.getElementById("start") as HTMLButtonElement;
+  const state = root.getElementById("state")!,
+    message = root.getElementById("message")!,
+    connection = root.getElementById("connection")!;
+  let disposed = false,
+    closed = false,
+    terminal = false,
+    starting = false,
+    started = false,
+    walletOpened = false;
+  let timer: ReturnType<typeof setTimeout> | undefined,
+    controller: AbortController | undefined;
+  const stop = () => {
+    clearTimeout(timer);
+    controller?.abort();
+  };
+  const cancel = async () => {
+    try {
+      await options.transport.cancel();
+    } catch {
+      if (!disposed) message.textContent = l.cancelFailed;
+    }
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    stop();
+    dialog.close();
+    trigger.focus();
+    if (!terminal) {
+      message.textContent = l.cancelled;
+      void cancel().then(() => {
+        if (!disposed) options.onCancel?.();
+      });
+    }
+  };
+  root.querySelector<HTMLButtonElement>(".close")!.onclick = close;
+  dialog.oncancel = (e) => {
+    e.preventDefault();
+    close();
+  };
+  dialog.onkeydown = (e) => {
+    if (e.key !== "Tab") return;
+    const items = Array.from(
+      dialog.querySelectorAll<HTMLElement>("button:not(:disabled),a[href]"),
+    );
+    const first = items[0],
+      last = items.at(-1);
+    if (e.shiftKey && root.activeElement === first) {
+      e.preventDefault();
+      last?.focus();
+    } else if (!e.shiftKey && root.activeElement === last) {
+      e.preventDefault();
+      first?.focus();
+    }
+  };
+  const finish = (result: VerificationStatus) => {
+    terminal = true;
+    stop();
+    connection.textContent = "";
+    const ok = result.status === "completed";
+    state.innerHTML = `<h2 id="title">${ok ? l.success : result.status === "expired" ? l.expired : l.failed}</h2><p>${ok ? (result.redirect_uri ? l.return : l.done) : l.retry}</p>${ok ? '<div class="success" aria-hidden="true">✓</div>' : ""}`;
+    if (ok) options.onComplete?.(result);
+  };
+  const poll = async () => {
+    if (disposed || closed || terminal) return;
+    if (Date.parse(options.review.expires_at) <= Date.now()) {
+      finish({ status: "expired" });
+      return;
+    }
+    controller = new AbortController();
+    try {
+      const result = await options.transport.status(controller.signal);
+      if (disposed || closed) return;
+      if (
+        ![
+          "pending",
+          "wallet_opened",
+          "completed",
+          "failed",
+          "expired",
+        ].includes(result.status)
+      )
+        throw new Error("Unknown status");
+      connection.textContent = "";
+      if (["completed", "failed", "expired"].includes(result.status)) {
+        finish(result);
+        return;
+      }
+      if (result.status === "wallet_opened" && !walletOpened) {
+        walletOpened = true;
+        state.innerHTML = `<h2 id="title">${l.loading}</h2><p>${l.follow}</p><div class="spinner" aria-hidden="true"></div>`;
+      }
+    } catch {
+      if (!disposed && !closed) connection.textContent = l.connection;
+    }
+    if (!disposed && !closed && !terminal) timer = setTimeout(poll, 3000);
+  };
+  trigger.onclick = async () => {
+    if (started || disposed) return;
+    started = true;
+    starting = true;
+    trigger.setAttribute("aria-disabled", "true");
+    state.innerHTML = `<h2 id="title">${l.title}</h2><p>${l.prepare}</p>`;
+    dialog.showModal();
+    try {
+      const handoff = validateHandoff(await options.transport.start());
+      starting = false;
+      if (closed || disposed) {
+        await cancel();
+        return;
+      }
+      state.innerHTML = `<h2 id="title">${l.title}</h2><p>${l.other}</p><img class="qr" alt="${l.other}"><div class="divider">${l.or}</div><p>${l.same}</p><a class="wallet-button" aria-label="${l.button}">${buttonImage}</a><p id="fallback" role="status"></p><a class="info" href="https://eudi-wallet.gov.de" target="_blank" rel="noreferrer">${l.info}</a>`;
+      state.querySelector<HTMLImageElement>(".qr")!.src =
+        "data:image/png;base64," + handoff.qr_code_base64;
+      const link = state.querySelector<HTMLAnchorElement>(".wallet-button")!;
+      link.href = handoff.url;
+      link.onclick = () => {
+        root.getElementById("fallback")!.textContent = l.fallback;
+      };
+      void poll();
+    } catch {
+      starting = false;
+      if (!disposed && !closed) {
+        state.innerHTML = `<h2 id="title">${l.failed}</h2><p class="error">${l.error}</p>`;
+        void cancel();
+      }
+    }
+  };
+  return {
+    destroy() {
+      if (disposed) return;
+      disposed = true;
+      stop();
+      dialog.close();
+      host.remove();
+      fonts.remove();
+      if (started && !terminal && !closed && !starting) void cancel();
+      closed = true;
+    },
+  };
+}
