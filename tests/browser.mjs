@@ -18,6 +18,7 @@ const server = createServer(async (req, res) => {
         "/node_modules/axe-core/axe.min.js",
         "/dist/index.js",
         "/dist/assets.js",
+        "/dist/styles.generated.js",
         "/dist/widget.css",
         "/dist/fonts.css",
         "/assets/Inter-latin.woff2",
@@ -43,19 +44,20 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const origin = "http://127.0.0.1:" + server.address().port;
 const browser = await chromium.launch({ headless: true });
 try {
-  for (const [language, width] of [["en", 1280], ["de", 390], ["en", 320]]) {
+  for (const [language, width] of [["en", 1280], ["de", 390], ["en", 320], ["en", 1024]]) {
     const page = await browser.newPage({
       viewport: { width, height: 900 },
     });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto(origin);
-    await page.evaluate(async (language) => {
+    await page.evaluate(async ({language, width}) => {
       const { mountVerification } = await import("/dist/index.js");
       window.calls = { start: 0, cancel: 0, complete: 0 };
       window.status = "pending";
       window.widget = mountVerification(document.getElementById("widget"), {
         language,
+        ...(width === 1024 ? { stylesheetUrl: "/dist/widget.css" } : {}),
         alternative: { url: "#", label: "Use another verification method" },
         review: {
           requester: "<img src=x onerror=alert(1)>",
@@ -84,7 +86,7 @@ try {
           window.calls.complete++;
         },
       });
-    }, language);
+    }, {language, width});
     const label =
       language === "de"
         ? "Verifizieren mit d-you Wallet"
