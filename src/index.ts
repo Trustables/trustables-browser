@@ -1,4 +1,5 @@
 import { verifyEn, verifyDe, trustables } from "./assets.js";
+import { widgetCss } from "./styles.generated.js";
 
 export type Review = {
   requester: string;
@@ -148,16 +149,30 @@ export function mountVerification(
     if (options.alternative.url === "#") link.onclick = (event) => event.preventDefault();
     need.append(link);
   }
-  const stylesheet = document.createElement("link");
-  stylesheet.rel = "stylesheet";
-  stylesheet.href =
-    options.stylesheetUrl || new URL("./widget.css", import.meta.url).href;
-  root.prepend(stylesheet);
-  // Font faces must be registered in the document, outside the shadow tree.
-  const fonts = document.createElement("link");
-  fonts.rel = "stylesheet";
-  fonts.href = new URL("./fonts.css", stylesheet.href).href;
-  document.head.append(fonts);
+  let fonts: HTMLLinkElement | undefined;
+  let fontFace: FontFace | undefined;
+  if (options.stylesheetUrl) {
+    // Compatibility for integrations that explicitly self-host the legacy files.
+    const stylesheet = document.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = options.stylesheetUrl;
+    root.prepend(stylesheet);
+    fonts = document.createElement("link");
+    fonts.rel = "stylesheet";
+    fonts.href = new URL("./fonts.css", stylesheet.href).href;
+    document.head.append(fonts);
+  } else {
+    // Constructed stylesheets work under strict CSP without inline style tags.
+    const stylesheet = new CSSStyleSheet();
+    stylesheet.replaceSync(widgetCss);
+    root.adoptedStyleSheets = [stylesheet];
+    // A static module-relative URL lets bundlers emit the font automatically.
+    const fontUrl = new URL("../assets/Inter-latin.woff2", import.meta.url).href;
+    fontFace = new FontFace("TrustablesInter", `url(${JSON.stringify(fontUrl)})`, {
+      weight: "100 900", display: "swap",
+    });
+    document.fonts.add(fontFace);
+  }
   for (const key of ["requester", "credential", "purpose"] as const)
     root.getElementById(key)!.textContent = options.review[key];
   const dialog = root.querySelector("dialog")!,
@@ -303,7 +318,8 @@ export function mountVerification(
       stop();
       dialog.close();
       host.remove();
-      fonts.remove();
+      fonts?.remove();
+      if (fontFace) document.fonts.delete(fontFace);
       if (started && !terminal && !closed && !starting) void cancel();
       closed = true;
     },

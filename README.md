@@ -1,8 +1,20 @@
 # Trustables browser widget
 
-Private preview of `@trustables/browser`: a framework-independent TypeScript widget shared by the Trustables hosted verification page and the Linden customer demo. It renders the review, official d-you button, device choices, QR code, progress and result. It does not create or verify credentials itself.
+`@trustables/browser` is a preview: a framework-independent TypeScript widget shared by the Trustables hosted verification page and the Linden customer demo. It renders the review, official d-you button, device choices, QR code, progress and result. It does not create or verify credentials itself.
 
-## Build and install
+## Install
+
+```sh
+npm install @trustables/browser
+```
+
+Import `mountVerification` in your browser application. With an asset-aware ESM bundler such as Vite, the package includes the styles and emits the Inter font automatically. No CSS imports, file-copy script or `stylesheetUrl` option is needed. Commit your lockfile to pin the installed version.
+
+The default uses Shadow DOM, constructed stylesheets and the FontFace API in current Chrome, Edge, Firefox and Safari. Your CSP should allow your application asset origin for scripts/fonts and `data:` for button and QR images. It does not require `unsafe-inline` for scripts or styles, and never loads assets from a third-party CDN.
+
+For unbundled ESM, serve the package's `dist/` and `assets/` directories together with their relative layout intact. Bundlers that do not handle `new URL(..., import.meta.url)` assets require explicit asset configuration. The legacy `stylesheetUrl` override remains supported for existing integrations: serve `dist/widget.css`, `dist/fonts.css` and `assets/Inter-latin.woff2` with that layout, then pass the public URL of `widget.css`.
+
+## Develop and release
 
 Use Node.js 24:
 
@@ -13,9 +25,9 @@ npm test
 npm pack
 ```
 
-This repository and package are private. No public npm package or CDN is published. Consumers currently install a reviewed, committed tarball with `npm install ./vendor/trustables-browser-0.1.1.tgz`; their lockfile pins its integrity. Rebuild and replace that tarball when updating the widget. The package contains compiled ESM, TypeScript declarations, styles and attributed assets.
+The package contains compiled ESM, TypeScript declarations, styles and attributed assets. `npm pack` builds it automatically. Tests include a fresh tarball installation and a Vite production build with strict CSP at a nested base path.
 
-Copy `dist/widget.css`, `dist/fonts.css` and `assets/Inter-latin.woff2` into your public asset directory, preserving those relative paths. Pass the public URL of `dist/widget.css` as `stylesheetUrl` when bundling the JavaScript. The default resolves CSS relative to the module, which also supports unbundled ESM. Styles are isolated in a shadow tree; the font stylesheet registers Inter in the document. CSP requires your asset origin for styles/fonts and `data:` images; no inline script or style permission is required.
+Release maintainers: publish the initial package using an npm account that can publish under `@trustables`. Then configure an npm trusted publisher for GitHub organisation `Trustables`, repository `trustables-browser`, workflow `publish.yml`. Tagged releases (`v` followed by the package version) run the tests and publish with provenance through GitHub OIDC. The workflow needs no stored npm token. Never reuse an already published version.
 
 ## Integration
 
@@ -30,7 +42,6 @@ const review = await callBackend("/verification/prepare");
 const widget = mountVerification(document.querySelector("#verification")!, {
   review,
   language: "en", // 'de' is also available
-  stylesheetUrl: "/trustables-widget/dist/widget.css",
   transport: {
     start: () => callBackend("/verification/start"),
     status: (signal) => callBackend("/verification/status", { signal }),
