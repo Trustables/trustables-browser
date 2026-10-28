@@ -91,4 +91,6 @@ Uses the unmodified official DE/EN button assets and the [d-you touchpoint guida
 
 `npm test` checks URL/image validation, consent, EN/DE, desktop/mobile layout, strict CSP, safe review text, keyboard focus, backend-only completion, cancellation and activation races. Platform integration tests cover tenant isolation and booking ownership. A genuine wallet end-to-end run and deployed signed-in acceptance remain separate release checks.
 
-Assets and attribution: [d-you source](assets/d-you-source.md), [Inter license](assets/Inter-OFL.txt). Trustables branding is proprietary. No open-source license is granted for the widget code.
+## License
+
+The widget code is licensed under the [MIT License](LICENSE). Bundled third-party assets retain their own terms: see [third-party notices](THIRD_PARTY_NOTICES.md), [d-you source](assets/d-you-source.md) and the [Inter license](assets/Inter-OFL.txt). The MIT license does not grant rights to use Trustables or d-you trademarks to imply endorsement or affiliation.
