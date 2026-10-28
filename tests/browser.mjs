@@ -222,14 +222,15 @@ try {
     "Browser widget: consent, DE/EN, both devices, injection safety, focus, backend-only success and cancellation race passed",
   );
   for (const language of ["en", "de"]) {
+    for (const buttonAppearance of [undefined, "wallet"]) {
     const page = await browser.newPage({viewport: {width: language === "en" ? 1280 : 390, height: 900}});
     await page.goto(origin);
-    await page.evaluate(async language => {
+    await page.evaluate(async ({language, buttonAppearance}) => {
       const {mountVerification} = await import("/dist/index.js");
       window.calls = {start: 0, complete: 0, cancel: 0};
       window.result = "pending";
       mountVerification(document.getElementById("widget"), {
-        language, simulator: {origin: "https://dev.trustables.de"},
+        language, simulator: {origin: "https://dev.trustables.de", buttonAppearance},
         alternative: {url: "#", label: "Alternative"},
         review: {requester: "Hotel", purpose: "Check-in", credential: "Test name", expires_at: new Date(Date.now()+60000).toISOString(), branded: true},
         transport: {
@@ -239,9 +240,11 @@ try {
         },
         onComplete() {window.calls.complete++;},
       });
-    }, language);
-    const label = language === "en" ? "Open Simulator" : "Simulator öffnen";
-    assert.equal(await page.locator("#start img").count(), 0);
+    }, {language, buttonAppearance});
+    const label = buttonAppearance === "wallet"
+      ? (language === "en" ? "Verify with d-you Wallet (Simulator)" : "Verifizieren mit d-you Wallet (Simulator)")
+      : (language === "en" ? "Open Simulator" : "Simulator öffnen");
+    assert.equal(await page.locator("#start img").count(), buttonAppearance === "wallet" ? 1 : 0);
     assert.equal(await page.evaluate(() => window.calls.start), 0);
     await page.getByRole("button", {name: label, exact:true}).click();
     const dialog = page.getByRole("dialog");
@@ -256,6 +259,7 @@ try {
     await page.getByRole("heading", {name: language === "en" ? "Simulation completed!" : "Simulation abgeschlossen!", exact:true}).waitFor();
     assert.equal(await page.evaluate(() => window.calls.complete), 1);
     await page.close();
+    }
   }
   {
     const page = await browser.newPage();
