@@ -1,6 +1,6 @@
 {
   "name": "@trustables/browser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Framework-independent d-you wallet verification widget for Trustables",
   "exports": {
@@ -34,7 +34,7 @@
     "type": "git",
     "url": "git+https://github.com/Trustables/trustables-browser.git"
   },
-  "homepage": "https://docs.dev.trustables.de/guides/browser-widget/",
+  "homepage": "https://docs.trustables.de",
   "bugs": {
     "url": "https://github.com/Trustables/trustables-browser/issues"
   },
