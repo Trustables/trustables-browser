@@ -257,6 +257,27 @@ try {
     assert.equal(await page.evaluate(() => window.calls.complete), 1);
     await page.close();
   }
+  {
+    const page = await browser.newPage();
+    await page.goto(origin);
+    await page.evaluate(async () => {
+      const {mountVerification} = await import("/dist/index.js");
+      window.polls = 0;
+      mountVerification(document.getElementById("widget"), {
+        simulator: {origin: "https://dev.trustables.de"},
+        review: {requester:"Hotel", purpose:"Check-in", credential:"Name", expires_at: new Date(Date.now()+60000).toISOString()},
+        transport: {
+          async start() {return {url:"https://dev.trustables.de/simulator#"+"a".repeat(48), expires_at: new Date(Date.now()-1000).toISOString(), qr_code_base64:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII="};},
+          async status() {window.polls++; return {status:"completed"};},
+          async cancel() {},
+        },
+      });
+    });
+    await page.getByRole("button", {name:"Open Simulator",exact:true}).click();
+    await page.getByRole("heading", {name:"Verification expired",exact:true}).waitFor();
+    assert.equal(await page.evaluate(() => window.polls), 0, "Actual session expiry bounds the initial review expiry");
+    await page.close();
+  }
 } finally {
   await browser.close();
   await new Promise((r) => server.close(r));
