@@ -26,3 +26,14 @@ test("only wallet schemes with HTTPS requests and PNG QR images are accepted", (
     }),
   );
 });
+
+test("simulator handoffs require explicit mode, pinned HTTPS origin and capability path", () => {
+  const simulator = { origin: "https://dev.trustables.de" };
+  const url = simulator.origin + "/simulator#" + "a".repeat(48);
+  assert.equal(validateHandoff({ url, qr_code_base64: qr }, simulator).url, url);
+  assert.throws(() => validateHandoff({ url, qr_code_base64: qr }));
+  for (const invalid of [url.replace("https:", "http:"), url.replace("dev.trustables.de", "evil.example"), url.replace("/simulator", "/other"), url.replace("#", "?query=x#"), url.replace("#" + "a".repeat(48), "#short"), url.replace("https://", "https://user:pass@"), "haip-vp://?request_uri=https%3A%2F%2Fverify.example"]) {
+    assert.throws(() => validateHandoff({ url: invalid, qr_code_base64: qr }, simulator));
+  }
+  assert.throws(() => validateHandoff({url, qr_code_base64: qr, expires_at: "invalid"}, simulator));
+});

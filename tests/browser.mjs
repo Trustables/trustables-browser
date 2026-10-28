@@ -221,6 +221,42 @@ try {
   console.log(
     "Browser widget: consent, DE/EN, both devices, injection safety, focus, backend-only success and cancellation race passed",
   );
+  for (const language of ["en", "de"]) {
+    const page = await browser.newPage({viewport: {width: language === "en" ? 1280 : 390, height: 900}});
+    await page.goto(origin);
+    await page.evaluate(async language => {
+      const {mountVerification} = await import("/dist/index.js");
+      window.calls = {start: 0, complete: 0, cancel: 0};
+      window.result = "pending";
+      mountVerification(document.getElementById("widget"), {
+        language, simulator: {origin: "https://dev.trustables.de"},
+        alternative: {url: "#", label: "Alternative"},
+        review: {requester: "Hotel", purpose: "Check-in", credential: "Test name", expires_at: new Date(Date.now()+60000).toISOString(), branded: true},
+        transport: {
+          async start() { window.calls.start++; return {url: "https://dev.trustables.de/simulator#"+"a".repeat(48), qr_code_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII="}; },
+          async status() {return {status: window.result};},
+          async cancel() {window.calls.cancel++;},
+        },
+        onComplete() {window.calls.complete++;},
+      });
+    }, language);
+    const label = language === "en" ? "Open Simulator" : "Simulator öffnen";
+    assert.equal(await page.locator("#start img").count(), 0);
+    assert.equal(await page.evaluate(() => window.calls.start), 0);
+    await page.getByRole("button", {name: label, exact:true}).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.locator(".qr").waitFor();
+    assert.equal(await dialog.locator(".info").count(), 0);
+    const link = dialog.getByRole("link", {name: label, exact:true});
+    assert.equal(await link.getAttribute("target"), "_blank");
+    assert.match(await link.getAttribute("href"), /^https:\/\/dev.trustables.de\/simulator#/);
+    assert.match(await dialog.innerText(), language === "en" ? /Simulation only/ : /Nur eine Simulation/);
+    assert.doesNotMatch(await dialog.innerText(), /d-you/);
+    await page.evaluate(() => {window.result = "completed";});
+    await page.getByRole("heading", {name: language === "en" ? "Simulation completed!" : "Simulation abgeschlossen!", exact:true}).waitFor();
+    assert.equal(await page.evaluate(() => window.calls.complete), 1);
+    await page.close();
+  }
 } finally {
   await browser.close();
   await new Promise((r) => server.close(r));

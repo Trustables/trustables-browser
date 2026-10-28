@@ -191,3 +191,16 @@ dialog p {
     border-radius: 0;
   }
 }
+
+.simulator-button {
+  padding: 14px 24px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #334155;
+  color: white;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.5;
+  text-decoration: none;
+  text-align: center;
+}

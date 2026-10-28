@@ -8,7 +8,7 @@ export type Review = {
   expires_at: string;
   branded?: boolean;
 };
-export type Handoff = { url: string; qr_code_base64: string };
+export type Handoff = { url: string; qr_code_base64: string; expires_at?: string };
 export type VerificationStatus = {
   status: "pending" | "wallet_opened" | "completed" | "failed" | "expired";
   redirect_uri?: string;
@@ -20,6 +20,8 @@ export type Transport = {
   cancel(): Promise<unknown>;
 };
 export type Options = {
+  /** Explicit test-only presentation. Wallet mode remains the default. */
+  simulator?: { origin: string };
   stylesheetUrl?: string;
   review: Review;
   transport: Transport;
@@ -99,17 +101,51 @@ const labels = {
   },
 };
 
-export function validateHandoff(value: Handoff): Handoff {
+const simulatorLabels = {
+  en: {
+    button: "Open Simulator", title: "Simulate verification",
+    need: "Simulation only. Uses synthetic test data; no real identity is verified. No wallet app is needed.",
+    other: "Scan this QR code to open the Simulator on another device.",
+    same: "Continue in the Simulator on this device.",
+    prepare: "Preparing simulation…", loading: "Continue in the Simulator",
+    success: "Simulation completed!", done: "The simulated result is available to the requesting business.",
+    fallback: "Complete the steps in the Simulator tab, then return here.",
+    powered: "Simulation powered by Trustables",
+  },
+  de: {
+    button: "Simulator öffnen", title: "Verifizierung simulieren",
+    need: "Nur eine Simulation mit synthetischen Testdaten. Keine echte Identität wird verifiziert. Du benötigst keine Wallet-App.",
+    other: "Scanne diesen QR-Code, um den Simulator auf einem anderen Gerät zu öffnen.",
+    same: "Weiter im Simulator auf diesem Gerät.",
+    prepare: "Simulation wird vorbereitet…", loading: "Weiter im Simulator",
+    success: "Simulation abgeschlossen!", done: "Das simulierte Ergebnis liegt dem anfragenden Unternehmen vor.",
+    fallback: "Schließe die Schritte im Simulator-Tab ab und kehre dann hierher zurück.",
+    powered: "Simulation mit Trustables",
+  },
+};
+
+function simulatorOrigin(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.username || url.password || url.origin !== value)
+    throw new Error("Invalid simulator origin");
+  return url.origin;
+}
+
+export function validateHandoff(value: Handoff, simulator?: Options["simulator"]): Handoff {
   const url = new URL(value.url);
-  if (
-    !["haip-vp:", "openid4vp:"].includes(url.protocol) ||
-    url.username ||
-    url.password
-  )
-    throw new Error("Invalid wallet link");
-  const request = new URL(url.searchParams.get("request_uri") || "");
-  if (request.protocol !== "https:" || request.username || request.password)
-    throw new Error("Invalid wallet request");
+  if (simulator) {
+    if (url.origin !== simulatorOrigin(simulator.origin) || url.username || url.password ||
+        !["/simulator", "/verification/start"].includes(url.pathname) || url.search || url.hash.length < 41)
+      throw new Error("Invalid simulator link");
+  } else {
+    if (!["haip-vp:", "openid4vp:"].includes(url.protocol) || url.username || url.password)
+      throw new Error("Invalid wallet link");
+    const request = new URL(url.searchParams.get("request_uri") || "");
+    if (request.protocol !== "https:" || request.username || request.password)
+      throw new Error("Invalid wallet request");
+  }
+  if (value.expires_at !== undefined && !Number.isFinite(Date.parse(value.expires_at)))
+    throw new Error("Invalid handoff expiry");
   if (
     !/^[A-Za-z0-9+/]+={0,2}$/.test(value.qr_code_base64) ||
     value.qr_code_base64.length > 500000 ||
@@ -126,6 +162,8 @@ export function mountVerification(
 ): Widget {
   if (!Number.isFinite(Date.parse(options.review.expires_at)))
     throw new Error("Invalid session expiry");
+  if (options.simulator) simulatorOrigin(options.simulator.origin);
+  let expiresAt = Date.parse(options.review.expires_at);
   let alternative: URL | undefined;
   if (options.alternative) {
     alternative = new URL(options.alternative.url, document.baseURI);
@@ -135,13 +173,14 @@ export function mountVerification(
   const host = document.createElement("div");
   container.append(host);
   const root = host.attachShadow({ mode: "open" }),
-    l = labels[options.language || "en"];
+    l = { ...labels[options.language || "en"], ...(options.simulator ? simulatorLabels[options.language || "en"] : {}) };
   const artwork = options.language === "de" ? verifyDe : verifyEn;
-  const buttonImage = `<img src="${artwork}" alt="${l.button}">`;
-  root.innerHTML = `<section class="review" aria-label="${l.title}"><div><small>${l.requested}</small><p id="requester"></p></div><div><small>${l.request}</small><p id="credential"></p></div><div><small>${l.purpose}</small><p id="purpose"></p></div></section><p class="need">${l.need}</p><button class="wallet-button" id="start" aria-label="${l.button}">${buttonImage}</button><p id="message" class="message" role="status"></p>${options.review.branded ? `<div class="brand"><img src="${trustables}" alt="Trustables">${l.powered}</div>` : ""}<dialog aria-labelledby="title"><button class="close" aria-label="${l.close}">×</button><div id="state" aria-live="polite" aria-atomic="true"></div><p id="connection" role="status"></p></dialog>`;
+  const buttonClass = options.simulator ? "wallet-button simulator-button" : "wallet-button";
+  const buttonImage = options.simulator ? l.button : `<img src="${artwork}" alt="${l.button}">`;
+  root.innerHTML = `<section class="review" aria-label="${l.title}"><div><small>${l.requested}</small><p id="requester"></p></div><div><small>${l.request}</small><p id="credential"></p></div><div><small>${l.purpose}</small><p id="purpose"></p></div></section><p class="need">${l.need}</p><button class="${buttonClass}" id="start" aria-label="${l.button}">${buttonImage}</button><p id="message" class="message" role="status"></p>${options.review.branded ? `<div class="brand"><img src="${trustables}" alt="Trustables">${l.powered}</div>` : ""}<dialog aria-labelledby="title"><button class="close" aria-label="${l.close}">×</button><div id="state" aria-live="polite" aria-atomic="true"></div><p id="connection" role="status"></p></dialog>`;
   if (alternative && options.alternative) {
     const need = root.querySelector<HTMLElement>(".need")!;
-    need.textContent = options.language === "de"
+    need.textContent = options.simulator ? l.need + " " : options.language === "de"
       ? "Du benötigst die d-you Wallet App. " : "You need the d-you Wallet app. ";
     const link = document.createElement("a");
     link.href = alternative.href;
@@ -248,7 +287,7 @@ export function mountVerification(
   };
   const poll = async () => {
     if (disposed || closed || terminal) return;
-    if (Date.parse(options.review.expires_at) <= Date.now()) {
+    if (expiresAt <= Date.now()) {
       finish({ status: "expired" });
       return;
     }
@@ -288,17 +327,19 @@ export function mountVerification(
     renderState(`<h2 id="title">${l.title}</h2><p>${l.prepare}</p>`);
     dialog.showModal();
     try {
-      const handoff = validateHandoff(await options.transport.start());
+      const handoff = validateHandoff(await options.transport.start(), options.simulator);
+      if (handoff.expires_at) expiresAt = Math.min(expiresAt, Date.parse(handoff.expires_at));
       starting = false;
       if (closed || disposed) {
         await cancel();
         return;
       }
-      renderState(`<h2 id="title">${l.title}</h2><p>${l.other}</p><img class="qr" alt="${l.other}"><div class="divider">${l.or}</div><p>${l.same}</p><a class="wallet-button" aria-label="${l.button}">${buttonImage}</a><p id="fallback" role="status"></p><a class="info" href="https://eudi-wallet.gov.de" target="_blank" rel="noreferrer">${l.info}</a>`);
+      renderState(`<h2 id="title">${l.title}</h2><p>${l.other}</p>${options.simulator ? `<p class="need">${l.need}</p>` : ""}<img class="qr" alt="${l.other}"><div class="divider">${l.or}</div><p>${l.same}</p><a class="${buttonClass}" aria-label="${l.button}">${buttonImage}</a><p id="fallback" role="status"></p>${options.simulator ? "" : `<a class="info" href="https://eudi-wallet.gov.de" target="_blank" rel="noreferrer">${l.info}</a>`}`);
       state.querySelector<HTMLImageElement>(".qr")!.src =
         "data:image/png;base64," + handoff.qr_code_base64;
       const link = state.querySelector<HTMLAnchorElement>(".wallet-button")!;
       link.href = handoff.url;
+      if (options.simulator) { link.target = "_blank"; link.rel = "noopener noreferrer"; }
       link.onclick = () => {
         root.getElementById("fallback")!.textContent = l.fallback;
       };
