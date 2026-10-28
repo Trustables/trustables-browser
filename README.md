@@ -104,6 +104,11 @@ wallet installation instructions. Wallet mode remains the default and rejects
 HTTPS handoffs. Simulator mode accepts only the pinned HTTPS origin's `/simulator`
 or `/verification/start` capability URLs; it never accepts wallet deep links.
 
+For a customer demo that previews the wallet button, add `buttonAppearance: "wallet"`
+inside `simulator`. This uses the existing button artwork while retaining visible
+simulation wording, a Simulator-qualified accessible label and the Simulator URL.
+It does not turn the demonstration into a wallet verification or imply certification.
+
 Return the session's `expires_at` alongside `url` and `qr_code_base64` from
 `transport.start()` when the session is created after consent. It can shorten,
 never extend, the review expiry. Same-device simulation opens a separate tab so

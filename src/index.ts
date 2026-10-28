@@ -21,7 +21,7 @@ export type Transport = {
 };
 export type Options = {
   /** Explicit test-only presentation. Wallet mode remains the default. */
-  simulator?: { origin: string };
+  simulator?: { origin: string; buttonAppearance?: "wallet" };
   stylesheetUrl?: string;
   review: Review;
   transport: Transport;
@@ -175,8 +175,12 @@ export function mountVerification(
   const root = host.attachShadow({ mode: "open" }),
     l = { ...labels[options.language || "en"], ...(options.simulator ? simulatorLabels[options.language || "en"] : {}) };
   const artwork = options.language === "de" ? verifyDe : verifyEn;
-  const buttonClass = options.simulator ? "wallet-button simulator-button" : "wallet-button";
-  const buttonImage = options.simulator ? l.button : `<img src="${artwork}" alt="${l.button}">`;
+  const useWalletArtwork = !options.simulator || options.simulator.buttonAppearance === "wallet";
+  if (options.simulator && useWalletArtwork) {
+    l.button = `${labels[options.language || "en"].button} (Simulator)`;
+  }
+  const buttonClass = useWalletArtwork ? "wallet-button" : "wallet-button simulator-button";
+  const buttonImage = useWalletArtwork ? `<img src="${artwork}" alt="${l.button}">` : l.button;
   root.innerHTML = `<section class="review" aria-label="${l.title}"><div><small>${l.requested}</small><p id="requester"></p></div><div><small>${l.request}</small><p id="credential"></p></div><div><small>${l.purpose}</small><p id="purpose"></p></div></section><p class="need">${l.need}</p><button class="${buttonClass}" id="start" aria-label="${l.button}">${buttonImage}</button><p id="message" class="message" role="status"></p>${options.review.branded ? `<div class="brand"><img src="${trustables}" alt="Trustables">${l.powered}</div>` : ""}<dialog aria-labelledby="title"><button class="close" aria-label="${l.close}">×</button><div id="state" aria-live="polite" aria-atomic="true"></div><p id="connection" role="status"></p></dialog>`;
   if (alternative && options.alternative) {
     const need = root.querySelector<HTMLElement>(".need")!;
