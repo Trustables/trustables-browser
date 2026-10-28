@@ -1,6 +1,6 @@
 {
   "name": "@trustables/browser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Framework-independent d-you wallet verification widget for Trustables",
   "exports": {
@@ -14,7 +14,9 @@
   "files": [
     "dist",
     "assets",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "node tools/build.mjs && tsc",
@@ -34,11 +36,11 @@
     "type": "git",
     "url": "git+https://github.com/Trustables/trustables-browser.git"
   },
-  "homepage": "https://docs.dev.trustables.de/guides/browser-widget/",
+  "homepage": "https://docs.trustables.de",
   "bugs": {
     "url": "https://github.com/Trustables/trustables-browser/issues"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
