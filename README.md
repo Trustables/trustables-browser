@@ -94,3 +94,19 @@ Uses the unmodified official DE/EN button assets and the [d-you touchpoint guida
 ## License
 
 The widget code is licensed under the [MIT License](LICENSE). Bundled third-party assets retain their own terms: see [third-party notices](THIRD_PARTY_NOTICES.md), [d-you source](assets/d-you-source.md) and the [Inter license](assets/Inter-OFL.txt). The MIT license does not grant rights to use Trustables or d-you trademarks to imply endorsement or affiliation.
+
+## Simulator presentation
+
+Set `simulator: { origin: "https://dev.trustables.de" }` to explicitly enable
+synthetic demonstrations. The same modal and accessibility behavior use a neutral
+“Open Simulator” button and visible simulation wording, without d-you assets or
+wallet installation instructions. Wallet mode remains the default and rejects
+HTTPS handoffs. Simulator mode accepts only the pinned HTTPS origin's `/simulator`
+or `/verification/start` capability URLs; it never accepts wallet deep links.
+
+Return the session's `expires_at` alongside `url` and `qr_code_base64` from
+`transport.start()` when the session is created after consent. It can shorten,
+never extend, the review expiry. Same-device simulation opens a separate tab so
+the merchant page can keep polling. Your backend must still validate the exact
+session, synthetic mode, acceptance and business eligibility; a completed widget
+is never identity evidence. Cancelling the widget must revoke merchant acceptance.
