@@ -1,6 +1,6 @@
 {
   "name": "@trustables/browser",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "description": "Framework-independent d-you wallet verification widget for Trustables",
   "exports": {
@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "build": "node tools/build.mjs && tsc",
-    "test": "npm run build && node --test tests/unit.mjs && node tests/browser.mjs && node tests/install.mjs",
+    "test": "npm run build && node --test tests/unit.mjs && node tests/browser.mjs && node tests/tab-return.mjs && node tests/install.mjs",
     "prepack": "npm run build"
   },
   "devDependencies": {

@@ -17,6 +17,7 @@ const server = createServer(async (req, res) => {
       [
         "/node_modules/axe-core/axe.min.js",
         "/dist/index.js",
+        "/dist/tab-return.js",
         "/dist/assets.js",
         "/dist/styles.generated.js",
         "/dist/widget.css",
