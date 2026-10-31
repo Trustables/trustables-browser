@@ -71,5 +71,40 @@ try {
     assert.equal(await unavailable.evaluate(async session=>{const {resumeOriginalTab}=await import('/dist/index.js');return resumeOriginalTab(session);},session),'unavailable');
     await context.close();
   }
+  // Exercise the public widget lifecycle as well as the internal protocol helper.
+  for (const lifecycle of ['completed', 'failed', 'expired', 'closed', 'destroyed', 'late-destroy']) {
+    const context = await browser.newContext(), page = await context.newPage();
+    await page.goto(origin + '/checkout');
+    await page.evaluate(async ({session, lifecycle}) => {
+      const {mountVerification} = await import('/dist/index.js');
+      const nativeDigest = crypto.subtle.digest.bind(crypto.subtle);
+      if (lifecycle === 'late-destroy') {
+        crypto.subtle.digest = (...args) => new Promise(resolve => {
+          window.releaseDigest = async () => resolve(await nativeDigest(...args));
+        });
+      }
+      window.calls = 0; window.done = false;
+      const target = document.body.appendChild(document.createElement('main'));
+      window.widget = mountVerification(target, {
+        language: 'en',
+        review: {requester:'Merchant',credential:'Name',purpose:'Booking',expires_at:new Date(Date.now()+60000).toISOString()},
+        returnToOriginalTab: {namespace:'merchant', async resume() {window.calls++;return true;}},
+        transport: {
+          async start() {return {url:'haip-vp://?request_uri='+encodeURIComponent('https://verify.example/request?state='+session),qr_code_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='};},
+          async status() {window.done=true;return {status:['completed','failed','expired'].includes(lifecycle) ? lifecycle : 'pending'};},
+          async cancel() {},
+        },
+      });
+    }, {session, lifecycle});
+    await page.locator('#start').click();
+    await page.waitForFunction(() => window.done);
+    if (lifecycle === 'closed') await page.locator('.close').click();
+    if (['completed','destroyed','late-destroy'].includes(lifecycle)) await page.evaluate(() => window.widget.destroy());
+    if (lifecycle === 'late-destroy') await page.evaluate(async () => {await window.releaseDigest();});
+    const result = await callback(context);
+    assert.equal(result.result, lifecycle === 'completed' ? 'close-requested' : 'no-original', lifecycle);
+    assert.equal(await page.evaluate(() => window.calls), lifecycle === 'completed' ? 1 : 0, lifecycle);
+    await context.close();
+  }
   console.log('Tab-return tests passed: backend-approved restore, cross-path scope, popup close, blocked-close signal, pending/timeout rejection, namespace/session isolation, no self-close, cleanup and unavailable APIs');
 } finally {await browser.close();await new Promise(r=>server.close(r));}
