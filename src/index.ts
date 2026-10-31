@@ -1,3 +1,5 @@
+import { registerOriginalTab, type OriginalTabOptions } from "./tab-return.js";
+export { resumeOriginalTab, type OriginalTabOptions, type OriginalTabReturnResult } from "./tab-return.js";
 import { verifyEn, verifyDe, trustables } from "./assets.js";
 import { widgetCss } from "./styles.generated.js";
 
@@ -20,6 +22,8 @@ export type Transport = {
   cancel(): Promise<unknown>;
 };
 export type Options = {
+  /** Opt in to restoring an accepted merchant checkout in the original browser tab. */
+  returnToOriginalTab?: OriginalTabOptions;
   /** Explicit test-only presentation. Wallet mode remains the default. */
   simulator?: { origin: string; buttonAppearance?: "wallet" };
   stylesheetUrl?: string;
@@ -228,7 +232,9 @@ export function mountVerification(
     terminal = false,
     starting = false,
     started = false,
-    walletOpened = false;
+    walletOpened = false,
+    completed = false;
+  let stopReturnReceiver: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined,
     controller: AbortController | undefined;
   const stop = () => {
@@ -246,6 +252,7 @@ export function mountVerification(
     if (closed) return;
     closed = true;
     stop();
+    if (!completed) stopReturnReceiver?.();
     dialog.close();
     trigger.focus();
     if (!terminal) {
@@ -286,6 +293,8 @@ export function mountVerification(
     stop();
     connection.textContent = "";
     const ok = result.status === "completed";
+    completed = ok;
+    if (!ok) stopReturnReceiver?.();
     renderState(`<h2 id="title">${ok ? l.success : result.status === "expired" ? l.expired : l.failed}</h2><p>${ok ? (result.redirect_uri ? l.return : l.done) : l.retry}</p>${ok ? '<div class="success" aria-hidden="true">✓</div>' : ""}`);
     if (ok) options.onComplete?.(result);
   };
@@ -343,6 +352,13 @@ export function mountVerification(
         "data:image/png;base64," + handoff.qr_code_base64;
       const link = state.querySelector<HTMLAnchorElement>(".wallet-button")!;
       link.href = handoff.url;
+      if (options.returnToOriginalTab && !options.simulator) {
+        const session = new URL(new URL(handoff.url).searchParams.get("request_uri")!).searchParams.get("state");
+        if (session) void registerOriginalTab(session, expiresAt, options.returnToOriginalTab).then(cleanup => {
+          if ((disposed || closed || terminal) && !completed) cleanup();
+          else stopReturnReceiver = cleanup;
+        });
+      }
       if (options.simulator) { link.target = "_blank"; link.rel = "noopener noreferrer"; }
       link.onclick = () => {
         root.getElementById("fallback")!.textContent = l.fallback;
@@ -361,6 +377,7 @@ export function mountVerification(
       if (disposed) return;
       disposed = true;
       stop();
+      if (!completed) stopReturnReceiver?.();
       dialog.close();
       host.remove();
       fonts?.remove();

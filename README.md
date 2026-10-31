@@ -115,3 +115,58 @@ never extend, the review expiry. Same-device simulation opens a separate tab so
 the merchant page can keep polling. Your backend must still validate the exact
 session, synthetic mode, acceptance and business eligibility; a completed widget
 is never identity evidence. Cancelling the widget must revoke merchant acceptance.
+
+## Return to the original browser tab
+
+Version 0.4 adds **opt-in, best-effort** coordination for same-device wallet returns.
+It requires a wallet handoff whose HTTPS `request_uri` contains the opaque `state`
+that your backend also includes in its callback URL. The original checkout and
+callback must share an origin and storage partition. Paths may differ.
+
+On the original checkout, add this option to `mountVerification`:
+
+```ts
+returnToOriginalTab: {
+  namespace: "my-checkout", // use the same namespace on the callback page
+  async resume(signal) {
+    // Check the original view still exists. Fetch this exact order through
+    // your authenticated, same-origin backend; honor the abort signal.
+    const order = await refreshOrderFromBackend(signal);
+    if (!checkoutIsMounted() || !order.verificationAccepted) return false;
+    renderVerifiedOrder(order);
+    return true;
+  },
+},
+```
+
+On the wallet callback page, capture the state before removing callback parameters
+from browser history, then try coordination before ordinary server-backed recovery:
+
+```ts
+import { resumeOriginalTab } from "@trustables/browser";
+const state = new URL(location.href).searchParams.get("state");
+if (state) await resumeOriginalTab(state, { namespace: "my-checkout" });
+await restoreOrderFromAuthenticatedBackend(); // always keep this fallback
+```
+
+The return value is `unavailable`, `no-original`, or `close-requested`.
+**`close-requested` does not prove the tab closed.** Safari and other browsers may
+refuse focus or closure, particularly for tabs opened by another app. The helper
+never opens another tab. Unsupported APIs, suspended original tabs and timeouts
+fall back to ordinary recovery. A no-opener browser test is not proof of the
+native wallet/iPhone return behaviour; test the actual device and wallet.
+
+Coordination sends only random document/challenge IDs and protocol messages,
+using a channel derived from the namespace and a hash of the opaque state.
+It never broadcasts credentials, claims, raw state or acceptance payloads. The
+merchant callback must return true only after restoring backend-accepted state;
+URL flags, BroadcastChannel messages and widget notifications are not authority
+to fulfill an order. Same-origin scripts share the browser trust boundary.
+
+Probes stop within two seconds; merchant refresh gets an abort signal after
+1.5 seconds. Honor that signal. Receivers are bounded by the known session expiry
+plus 15 seconds, at most 10 minutes and 15 seconds, and are removed on page exit,
+cancellation, failure or destruction before success. Successful widget removal
+keeps the receiver briefly available for the merchant's verified result view;
+`resume` must reject when that view has been removed. Simulator links are not
+registered for this optional wallet-return feature.
