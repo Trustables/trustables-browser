@@ -3,6 +3,9 @@ export { resumeOriginalTab, type OriginalTabOptions, type OriginalTabReturnResul
 import { verifyEn, verifyDe, trustables } from "./assets.js";
 import { widgetCss } from "./styles.generated.js";
 
+import { Environment, parseEnvironment } from './environment.js';
+export { Environment, parseEnvironment } from './environment.js';
+
 export type Review = {
   requester: string;
   purpose: string;
@@ -22,6 +25,8 @@ export type Transport = {
   cancel(): Promise<unknown>;
 };
 export type Options = {
+  /** Optional explicit environment; legacy callers infer it from simulator options. */
+  environment?: Environment;
   /** Opt in to restoring an accepted merchant checkout in the original browser tab. */
   returnToOriginalTab?: OriginalTabOptions;
   /** Explicit test-only presentation. Wallet mode remains the default. */
@@ -164,6 +169,10 @@ export function mountVerification(
   container: HTMLElement,
   options: Options,
 ): Widget {
+  const environment = parseEnvironment(options.environment === undefined ? (options.simulator ? Environment.SIMULATOR : Environment.SANDBOX) : options.environment);
+  if (environment === Environment.PRODUCTION) throw new TypeError('Production is not supported by this SDK preview');
+  if ((environment === Environment.SIMULATOR) !== Boolean(options.simulator))
+    throw new TypeError('Simulator environment requires simulator options; Sandbox must not use them');
   if (!Number.isFinite(Date.parse(options.review.expires_at)))
     throw new Error("Invalid session expiry");
   if (options.simulator) simulatorOrigin(options.simulator.origin);

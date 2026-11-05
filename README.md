@@ -170,3 +170,27 @@ cancellation, failure or destruction before success. Successful widget removal
 keeps the receiver briefly available for the merchant's verified result view;
 `resume` must reject when that view has been removed. Simulator links are not
 registered for this optional wallet-return feature.
+
+## Typed environments
+
+```js
+import { Environment, parseEnvironment } from '@trustables/browser;
+
+const environment = Environment.SIMULATOR;
+// For untrusted configuration (invalid values throw TypeError):
+const configured = parseEnvironment('sandbox');
+```
+
+Pass `environment` to `mountVerification`. `Environment.SIMULATOR` also requires
+`simulator: { origin: 'https://your-trustables-host.example' }`; Sandbox must omit
+`simulator`. Existing callers can omit `environment`: the widget infers Simulator
+when `simulator` options exist, otherwise Sandbox. Environment selection only
+checks presentation configuration; your backend owns credentials and result validation.
+
+`Environment.SIMULATOR`, `Environment.SANDBOX` and `Environment.PRODUCTION` use
+`simulator`, `sandbox` and `production` on the wire. Existing supported string
+values remain compatible. Values are exact and case-sensitive; there is no fallback
+for typos. Production is defined for configuration consistency but is **not supported
+by this preview**: selecting it throws before any request or widget mounting.
+Environment selection does not provision access or change the API base URL. A
+production-hosted application can still use Simulator or Sandbox.

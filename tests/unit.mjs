@@ -37,3 +37,16 @@ test("simulator handoffs require explicit mode, pinned HTTPS origin and capabili
   }
   assert.throws(() => validateHandoff({url, qr_code_base64: qr, expires_at: "invalid"}, simulator));
 });
+
+test('environment configuration fails before mounting for invalid or mismatched modes', async () => {
+  const {Environment, parseEnvironment, mountVerification} = await import('../dist/index.js');
+  for (const value of Object.values(Environment)) assert.equal(parseEnvironment(value), value);
+  for (const value of [undefined, null, {}, [], '', 'Simulator', 'sandbx']) assert.throws(() => parseEnvironment(value), /Invalid environment/);
+  for (const [options, message] of [
+    [{environment:'sandbx'}, /Invalid environment/],
+    [{environment:null}, /Invalid environment/],
+    [{environment:Environment.PRODUCTION}, /Production is not supported/],
+    [{environment:Environment.SIMULATOR}, /Simulator environment requires/],
+    [{environment:Environment.SANDBOX, simulator:{origin:'https://test.example'}}, /Sandbox must not/],
+  ]) assert.throws(() => mountVerification(null, options), message);
+});

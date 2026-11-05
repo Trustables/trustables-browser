@@ -17,6 +17,7 @@ const server = createServer(async (req, res) => {
       [
         "/node_modules/axe-core/axe.min.js",
         "/dist/index.js",
+        "/dist/environment.js",
         "/dist/tab-return.js",
         "/dist/assets.js",
         "/dist/styles.generated.js",
@@ -53,10 +54,11 @@ try {
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto(origin);
     await page.evaluate(async ({language, width}) => {
-      const { mountVerification } = await import("/dist/index.js");
+      const { Environment, mountVerification } = await import("/dist/index.js");
       window.calls = { start: 0, cancel: 0, complete: 0 };
       window.status = "pending";
       window.widget = mountVerification(document.getElementById("widget"), {
+        environment: Environment.SANDBOX,
         language,
         ...(width === 1024 ? { stylesheetUrl: "/dist/widget.css" } : {}),
         alternative: { url: "#", label: "Use another verification method" },
