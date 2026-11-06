@@ -32,12 +32,16 @@ export type Options = {
   /** Explicit test-only presentation. Wallet mode remains the default. */
   simulator?: { origin: string; buttonAppearance?: "wallet" };
   stylesheetUrl?: string;
+  /** Bound each status read; activation is never automatically retried. Default 10 seconds. */
+  statusTimeoutMs?: number;
   review: Review;
   transport: Transport;
   language?: "en" | "de";
   /** Merchant-owned contact or alternative verification route. */
   alternative?: { url: string; label: string };
   onComplete?: (result: VerificationStatus) => void;
+  /** Any terminal outcome, including failure or expiry. Fetch your backend result before continuing. */
+  onFinish?: (result: VerificationStatus) => void;
   onCancel?: () => void;
 };
 export type Widget = { destroy(): void };
@@ -177,6 +181,8 @@ export function mountVerification(
     throw new Error("Invalid session expiry");
   if (options.simulator) simulatorOrigin(options.simulator.origin);
   let expiresAt = Date.parse(options.review.expires_at);
+  const statusTimeoutMs = options.statusTimeoutMs ?? 10000;
+  if (!Number.isFinite(statusTimeoutMs) || statusTimeoutMs <= 0) throw new TypeError("statusTimeoutMs must be positive");
   let alternative: URL | undefined;
   if (options.alternative) {
     alternative = new URL(options.alternative.url, document.baseURI);
@@ -244,10 +250,12 @@ export function mountVerification(
     walletOpened = false,
     completed = false;
   let stopReturnReceiver: (() => void) | undefined;
+  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined,
     controller: AbortController | undefined;
   const stop = () => {
     clearTimeout(timer);
+    clearTimeout(expiryTimer);
     controller?.abort();
   };
   const cancel = async () => {
@@ -281,15 +289,14 @@ export function mountVerification(
     const items = Array.from(
       dialog.querySelectorAll<HTMLElement>("button:not(:disabled),a[href]"),
     );
-    const first = items[0],
-      last = items.at(-1);
-    if (e.shiftKey && root.activeElement === first) {
-      e.preventDefault();
-      last?.focus();
-    } else if (!e.shiftKey && root.activeElement === last) {
-      e.preventDefault();
-      first?.focus();
-    }
+    // Safari can omit links from its native tab sequence depending on the
+    // user's keyboard settings. Own the full sequence inside this modal.
+    if (!items.length) return;
+    e.preventDefault();
+    const current = items.indexOf(root.activeElement as HTMLElement);
+    const next = current < 0 ? (e.shiftKey ? items.length - 1 : 0)
+      : (current + (e.shiftKey ? -1 : 1) + items.length) % items.length;
+    items[next].focus();
   };
   // Replacing focused controls must not strand keyboard focus outside the dialog.
   const renderState = (html: string) => {
@@ -298,6 +305,7 @@ export function mountVerification(
     if (hadFocus) root.querySelector<HTMLButtonElement>(".close")!.focus();
   };
   const finish = (result: VerificationStatus) => {
+    if (terminal || disposed || closed) return;
     terminal = true;
     stop();
     connection.textContent = "";
@@ -306,6 +314,7 @@ export function mountVerification(
     if (!ok) stopReturnReceiver?.();
     renderState(`<h2 id="title">${ok ? l.success : result.status === "expired" ? l.expired : l.failed}</h2><p>${ok ? (result.redirect_uri ? l.return : l.done) : l.retry}</p>${ok ? '<div class="success" aria-hidden="true">✓</div>' : ""}`);
     if (ok) options.onComplete?.(result);
+    options.onFinish?.(result);
   };
   const poll = async () => {
     if (disposed || closed || terminal) return;
@@ -314,9 +323,17 @@ export function mountVerification(
       return;
     }
     controller = new AbortController();
+    const current = controller;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
     try {
-      const result = await options.transport.status(controller.signal);
-      if (disposed || closed) return;
+      const result = await Promise.race([
+        options.transport.status(current.signal),
+        new Promise<never>((_, reject) => {
+          watchdog = setTimeout(() => { current.abort(); reject(new Error("Status timeout")); }, Math.min(statusTimeoutMs, Math.max(1, expiresAt - Date.now())));
+        }),
+      ]);
+      if (disposed || closed || terminal) return;
+      if (expiresAt <= Date.now()) { finish({status: "expired"}); return; }
       if (
         ![
           "pending",
@@ -334,11 +351,14 @@ export function mountVerification(
       }
       if (result.status === "wallet_opened" && !walletOpened) {
         walletOpened = true;
-        renderState(`<h2 id="title">${l.loading}</h2><p>${l.follow}</p><div class="spinner" aria-hidden="true"></div>`);
+        // A fetched request does not prove a usable wallet opened. Preserve both
+        // launch paths so the user can recover without creating another session.
+        root.getElementById("title")!.textContent = l.loading;
+        root.getElementById("fallback")!.textContent = l.fallback;
       }
     } catch {
-      if (!disposed && !closed) connection.textContent = l.connection;
-    }
+      if (!disposed && !closed && !terminal) connection.textContent = l.connection;
+    } finally { clearTimeout(watchdog); }
     if (!disposed && !closed && !terminal) timer = setTimeout(poll, 3000);
   };
   trigger.onclick = async () => {
@@ -348,14 +368,19 @@ export function mountVerification(
     trigger.setAttribute("aria-disabled", "true");
     renderState(`<h2 id="title">${l.title}</h2><p>${l.prepare}</p>`);
     dialog.showModal();
+    if (expiresAt <= Date.now()) { starting = false; finish({status: "expired"}); return; }
+    expiryTimer = setTimeout(() => { if (!disposed && !closed && !terminal) finish({status: "expired"}); }, Math.max(0, expiresAt - Date.now()));
     try {
       const handoff = validateHandoff(await options.transport.start(), options.simulator);
       if (handoff.expires_at) expiresAt = Math.min(expiresAt, Date.parse(handoff.expires_at));
+      clearTimeout(expiryTimer);
       starting = false;
       if (closed || disposed) {
         await cancel();
         return;
       }
+      if (terminal) return;
+      expiryTimer = setTimeout(() => { if (!disposed && !closed && !terminal) finish({status: "expired"}); }, Math.max(0, expiresAt - Date.now()));
       renderState(`<h2 id="title">${l.title}</h2><p>${l.other}</p>${options.simulator ? `<p class="need">${l.need}</p>` : ""}<img class="qr" alt="${l.other}"><div class="divider">${l.or}</div><p>${l.same}</p><a class="${buttonClass}" aria-label="${l.button}">${buttonImage}</a><p id="fallback" role="status"></p>${options.simulator ? "" : `<a class="info" href="https://eudi-wallet.gov.de" target="_blank" rel="noreferrer">${l.info}</a>`}`);
       state.querySelector<HTMLImageElement>(".qr")!.src =
         "data:image/png;base64," + handoff.qr_code_base64;
@@ -375,7 +400,8 @@ export function mountVerification(
       void poll();
     } catch {
       starting = false;
-      if (!disposed && !closed) {
+      if (!disposed && !closed && !terminal) {
+        stop();
         renderState(`<h2 id="title">${l.failed}</h2><p class="error">${l.error}</p>`);
         void cancel();
       }

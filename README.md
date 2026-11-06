@@ -194,3 +194,15 @@ for typos. Production is defined for configuration consistency but is **not supp
 by this preview**: selecting it throws before any request or widget mounting.
 Environment selection does not provision access or change the API base URL. A
 production-hosted application can still use Simulator or Sandbox.
+
+### Recovery and expiry
+
+Request retrieval does not prove that a wallet opened successfully. Both launch
+paths remain available while waiting. Status reads time out after ten seconds
+(`statusTimeoutMs` can override this); polling retries within the session expiry.
+Expiry also ends stalled activation and status calls. Closing the widget stops
+its timers and aborts the active status read. Activation is never automatically
+retried because the backend may already have processed it. Completion callbacks
+are UI notifications; your backend must confirm the expected session and result.
+
+Use `onFinish(result)` to refresh your order after any terminal outcome (completed, failed or expired). `onComplete` remains success-only. Neither callback authorizes an order; retrieve the expected session and business result from your backend.
