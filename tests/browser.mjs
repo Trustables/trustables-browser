@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import assert from "node:assert/strict";
 const server = createServer(async (req, res) => {
   try {
@@ -44,7 +44,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const origin = "http://127.0.0.1:" + server.address().port;
-const browser = await chromium.launch({ headless: true });
+const browser = await (process.env.TEST_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
 try {
   for (const [language, width] of [["en", 1280], ["de", 390], ["en", 320], ["en", 1024]]) {
     const page = await browser.newPage({
@@ -160,7 +160,7 @@ try {
       await dialog
         .getByText("Continue in the d-you Wallet", { exact: true })
         .waitFor();
-      assert.equal(await dialog.locator(".qr").count(), 0);
+      assert.equal(await dialog.locator(".qr").count(), 1, "Wallet request fetch retains recovery paths");
       assert.equal(await dialog.evaluate(el => el.contains(el.getRootNode().activeElement)), true, "Focus survives state replacement");
       assert.equal(await dialog.locator("#state").getAttribute("aria-live"), "polite");
       await page.evaluate(() => (window.status = "completed"));
@@ -285,6 +285,83 @@ try {
     assert.equal(await page.evaluate(() => window.polls), 0, "Actual session expiry bounds the initial review expiry");
     await page.close();
   }
+  {
+    const page = await browser.newPage();
+    await page.goto(origin);
+    await page.evaluate(async () => {
+      const {mountVerification} = await import("/dist/index.js");
+      window.cancelEvents = 0;
+      mountVerification(document.getElementById("widget"), {
+        review: {requester:"Linden",purpose:"Check-in",credential:"Name",expires_at:new Date(Date.now()+60000).toISOString()},
+        transport: {async start() {throw new Error("Uncertain start")}, async status() {throw new Error("Must not poll")}, async cancel() {}},
+        onCancel() {window.cancelEvents++},
+      });
+    });
+    await page.getByRole("button",{name:"Verify with d-you Wallet",exact:true}).click();
+    await page.getByRole("heading",{name:"Verification unsuccessful",exact:true}).waitFor();
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => window.cancelEvents === 1);
+    await page.close();
+  }
+  for (const outcome of ["completed", "failed", "expired"]) {
+    const page = await browser.newPage();
+    await page.goto(origin);
+    await page.evaluate(async outcome => {
+      const {mountVerification} = await import("/dist/index.js");
+      window.finished = []; window.successes = 0;
+      mountVerification(document.getElementById("widget"), {
+        review:{requester:"Linden",purpose:"Check-in",credential:"Name",expires_at:new Date(Date.now()+60000).toISOString()},
+        transport:{async start(){return {url:"haip-vp://?request_uri=https%3A%2F%2Fwallet.example%2Frequest",qr_code_base64:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII="}},async status(){return {status:outcome}},async cancel(){}},
+        onComplete(){window.successes++},onFinish(result){window.finished.push(result.status)},
+      });
+    }, outcome);
+    await page.getByRole("button",{name:"Verify with d-you Wallet",exact:true}).click();
+    await page.waitForFunction(() => window.finished.length === 1);
+    assert.deepEqual(await page.evaluate(() => window.finished), [outcome]);
+    assert.equal(await page.evaluate(() => window.successes), outcome === "completed" ? 1 : 0);
+    await page.close();
+  }
+  for (const mode of ["stalled-start", "stalled-status", "recover-status", "destroy-status"]) {
+    console.log('Checking recovery:', mode);
+    const page = await browser.newPage();
+    await page.goto(origin);
+    await page.evaluate(async mode => {
+      const {mountVerification} = await import("/dist/index.js");
+      window.calls = {start: 0, status: 0, complete: 0};
+      window.widget = mountVerification(document.getElementById("widget"), {
+        statusTimeoutMs: 30,
+        review: {requester: "Linden", purpose: "Check-in", credential: "Name", expires_at: new Date(Date.now() + (mode === "recover-status" ? 10000 : 250)).toISOString()},
+        transport: {
+          async start() {
+            window.calls.start++;
+            if(mode === "stalled-start") return new Promise(resolve => {window.late = resolve});
+            return {url: "haip-vp://?request_uri=https%3A%2F%2Fwallet.example%2Frequest", qr_code_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII="};
+          },
+          async status(signal) {
+            window.calls.status++;
+            if(mode === "recover-status" && window.calls.status > 1) return {status: "completed"};
+            return new Promise(resolve => {window.late = resolve; signal.addEventListener("abort", () => {window.aborted = true})});
+          },
+          async cancel() {},
+        },
+        onComplete() {window.calls.complete++},
+      });
+    }, mode);
+    await page.getByRole("button", {name: "Verify with d-you Wallet", exact: true}).click();
+    if(mode === "destroy-status") {
+      await page.waitForFunction(() => window.calls.status === 1);
+      await page.evaluate(() => window.widget.destroy());
+      assert.equal(await page.locator("dialog").count(), 0);
+    } else await page.getByRole("heading", {name: mode === "recover-status" ? "Verification successful!" : "Verification expired", exact: true}).waitFor();
+    if(mode !== "stalled-start") {
+      await page.evaluate(() => window.late({status: "completed"}));
+      assert.equal(await page.evaluate(() => window.aborted), true);
+    }
+    assert.equal(await page.evaluate(() => window.calls.complete), mode === "recover-status" ? 1 : 0);
+    assert.equal(await page.evaluate(() => window.calls.start), 1, "Never retry activation");
+    await page.close();
+  }
+  console.log("Stalled activation/status, bounded recovery, expiry, late-result rejection and destroy cleanup passed");
 } finally {
   await browser.close();
   await new Promise((r) => server.close(r));
